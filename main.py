@@ -121,9 +121,8 @@ if __name__ == '__main__':
         for sample_size in SAMPLE_SIZES:
             acc = []
             for i in range(ROUNDS):
-                # X_selection, _, y_selection, __ = train_test_split(X, y, train_size=int(sample_size), random_state=42,
-                # stratify=y.values)
-                sample = data.groupby('target', group_keys=False).apply(lambda x: x.sample(frac=sample_size))
+                sample = data.groupby('target', group_keys=False).apply(lambda x: x.sample(frac=sample_size,
+                                                                                           random_state=i))
                 X = sample.drop('target', axis=1)
                 y = sample['target']
 
