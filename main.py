@@ -41,9 +41,9 @@ NAN_REPLACEMENT = 'knn'  # options: mean, median, knn
 NAN_KNN_NEIGHBORS = 5  # should only be used, when knn for NaN replacement selected
 
 # training
-ROUNDS = 50
-SAMPLE_SIZES = np.linspace(100, 920, 50, endpoint=True)
-TRAIN_SIZE = np.linspace(0.5, 1, 10, endpoint=True)
+ROUNDS = 10
+SAMPLE_SIZES = np.linspace(0.1, 1, 50, endpoint=True)
+TRAIN_SIZE = np.linspace(0.3, 1, 5, endpoint=False)
 
 if __name__ == '__main__':
 
@@ -115,22 +115,33 @@ if __name__ == '__main__':
     # sns.catplot(data=data, kind='violin', x='target', y='age', hue='sex', split=True)
     # plt.show()
 
-    X = data.drop('target', axis=1)
-    y = data['target']
     output = pd.DataFrame(columns=['train_size', 'sample_size', 'avg_acc'])
 
     for train_size in TRAIN_SIZE:
         for sample_size in SAMPLE_SIZES:
-            acc = np.empty(50)
+            acc = []
             for i in range(ROUNDS):
-                X_selection, _, y_selection, __ = train_test_split(X, y, train_size=int(sample_size), random_state=42,
-                                                                   stratify=y.values)
-                X_train, X_test, y_train, y_test = train_test_split(X_selection, y_selection, train_size=train_size,
-                                                                    random_state=42, stratify=y_selection.values)
-                np.append(acc, SVC().fit(X_train, y_train).score(X_test, y_test))
-            avg_acc = np.mean(acc)
+                # X_selection, _, y_selection, __ = train_test_split(X, y, train_size=int(sample_size), random_state=42,
+                # stratify=y.values)
+                sample = data.groupby('target', group_keys=False).apply(lambda x: x.sample(frac=sample_size))
+                X = sample.drop('target', axis=1)
+                y = sample['target']
 
-            entry = pd.DataFrame({'train_size': train_size, 'sample_size': sample_size, 'avg_acc': avg_acc}, index=[0])
+                X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=train_size,
+                                                                    random_state=42, stratify=y.values)
+                acc.append(SVC().fit(X_train, y_train).score(X_test, y_test))
+            avg_acc = mean(acc)
+
+            entry = pd.DataFrame({'train_size': "{:.2f}".format(train_size), 'sample_size': sample_size * 920, 'avg_acc': avg_acc}, index=[0])
             output = pd.concat([output, entry], ignore_index=True)
+
+    sns.relplot(
+        data=output, kind="line",
+        x="sample_size", y="avg_acc",
+        hue="train_size",
+        facet_kws=dict(sharex=False),
+        legend='full'
+    )
+    plt.show()
 
     output.to_csv('output', index=False)
