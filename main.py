@@ -7,9 +7,14 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import sklearn as sl
 from sklearn.impute import KNNImputer
+from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 from statistics import mean
+
+
+# meeting
+# takeaway: NaN sind kein Problem, sollte man aber analysieren -> z.B. das beste Modell ohne NaN samples ausführen
 
 
 def read_data():
@@ -85,9 +90,17 @@ if __name__ == '__main__':
     # plt.show()
 
     # hist plot
-    # sns.histplot(data=data, x='age', binwidth=5)
+    # sns.histplot(data=data, x='age', binwidth=5, hue=data[['sex', 'target']].apply(tuple, axis=1))
     # plt.xlabel('age')
     # plt.ylabel('amount')
+    # plt.show()
+
+    g = sns.FacetGrid(data, col='target', height=4, aspect=.5, row='sex')
+    g.map(sns.histplot, "age", binwidth=5, alpha=0.5)
+    g.add_legend()
+    plt.show()
+
+    # sns.jointplot(data=data, x="age", y="target", hue="sex", alpha=0.6)
     # plt.show()
 
     # dis plot
@@ -115,32 +128,33 @@ if __name__ == '__main__':
     # sns.catplot(data=data, kind='violin', x='target', y='age', hue='sex', split=True)
     # plt.show()
 
-    output = pd.DataFrame(columns=['train_size', 'sample_size', 'avg_acc'])
-
-    for train_size in TRAIN_SIZE:
-        for sample_size in SAMPLE_SIZES:
-            acc = []
-            for i in range(ROUNDS):
-                sample = data.groupby('target', group_keys=False).apply(lambda x: x.sample(frac=sample_size,
-                                                                                           random_state=i))
-                X = sample.drop('target', axis=1)
-                y = sample['target']
-
-                X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=train_size,
-                                                                    random_state=42, stratify=y.values)
-                acc.append(SVC().fit(X_train, y_train).score(X_test, y_test))
-            avg_acc = mean(acc)
-
-            entry = pd.DataFrame({'train_size': "{:.2f}".format(train_size), 'sample_size': sample_size * 920, 'avg_acc': avg_acc}, index=[0])
-            output = pd.concat([output, entry], ignore_index=True)
-
-    sns.relplot(
-        data=output, kind="line",
-        x="sample_size", y="avg_acc",
-        hue="train_size",
-        facet_kws=dict(sharex=False),
-        legend='full'
-    )
-    plt.show()
-
-    output.to_csv('output', index=False)
+    # output = pd.DataFrame(columns=['train_size', 'sample_size', 'avg_acc'])
+    #
+    # for train_size in TRAIN_SIZE:
+    #     for sample_size in SAMPLE_SIZES:
+    #         acc = []
+    #         for i in range(ROUNDS):
+    #             sample = data.groupby('target', group_keys=False).apply(lambda x: x.sample(frac=sample_size,
+    #                                                                                        random_state=i))
+    #             X = sample.drop('target', axis=1)
+    #             y = sample['target']
+    #
+    #             X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=train_size,
+    #                                                                 random_state=42, stratify=y.values)
+    #             #acc.append(SVC().fit(X_train, y_train).score(X_test, y_test))
+    #             #acc.append(LogisticRegression(random_state=i, max_iter=1000, solver='liblinear').fit(X_train, y_train).score(X_test, y_test))
+    #         avg_acc = mean(acc)
+    #
+    #         entry = pd.DataFrame({'train_size': "{:.2f}".format(train_size), 'sample_size': sample_size * 920, 'avg_acc': avg_acc}, index=[0])
+    #         output = pd.concat([output, entry], ignore_index=True)
+    #
+    # sns.relplot(
+    #     data=output, kind="line",
+    #     x="sample_size", y="avg_acc",
+    #     hue="train_size",
+    #     facet_kws=dict(sharex=False),
+    #     legend='full'
+    # )
+    # plt.show()
+    #
+    # output.to_csv('output', index=False)
