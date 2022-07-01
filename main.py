@@ -190,6 +190,7 @@ def measure_performance(metric, prediction, target):
 if __name__ == '__main__':
 
     data = read_data()
+    # print((data[['chol', 'thal']] > 3))
     # print(data[(data > 400).any(1)])
 
     # plt.figure(figsize=(10, 10))
@@ -202,7 +203,7 @@ if __name__ == '__main__':
     X_data_without_nan = data_without_nan.drop('target', axis=1)
     y_data_without_nan = data_without_nan['target']
 
-    print(100 * data.isna().sum() / len(data))
+    # print(100 * data.isna().sum() / len(data))
     data = replace_nan(data)
     data = select_samples(data)
 
@@ -214,13 +215,13 @@ if __name__ == '__main__':
     # plotting section
 
     # print data in console
-    print(data)
-    print(data.info())
-    print(data.describe())
-    print(data.dtypes)
-    print(data.columns)
-    print(len(data))
-    print(data.head())
+    # print(data)
+    # print(data.info())
+    # print(data.describe())
+    # print(data.dtypes)
+    # print(data.columns)
+    # print(len(data))
+    # print(data.head())
 
     # print(data_without_nan)
     # print(data_without_nan.info())
