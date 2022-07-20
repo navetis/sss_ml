@@ -8,7 +8,8 @@ from sklearn.feature_selection import RFE, SequentialFeatureSelector
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn import metrics
-from sklearn.metrics import make_scorer, f1_score, recall_score, precision_score
+from sklearn.metrics import make_scorer, f1_score, recall_score, precision_score, accuracy_score, \
+    balanced_accuracy_score
 from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold, cross_validate, KFold
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
@@ -22,21 +23,20 @@ NAN_KNN_NEIGHBORS = 5  # should only be used, when knn for NaN replacement selec
 
 # training & validation
 ROUNDS = 50 #50
-SAMPLE_SIZES = np.array([0.03]) # np.linspace(0.05, 0.5, 2, endpoint=True) # 0.05, 0.1, 0.25, 0.5, 1.0
+SAMPLE_SIZES = np.array([0.03, .05, 0.1, 0.25, 0.5, 1.0]) # np.linspace(0.05, 0.5, 2, endpoint=True) # 0.03, 0.05, 0.1, 0.25, 0.5, 1.0
 TRAIN_SIZE = np.array([0.3, 0.6, 0.8, 0.9]) # np.linspace(0.1, 0.6, 2, endpoint=False) # 0.3, 0.6, 0.8, 0.9
-MODELS = np.array(['svm']) # 'svm', 'logistic_regression', 'naive_bayes', 'knn', 'random_forest', 'decision_tree'
-VALIDATION_TYPES = np.array(['all_kfold'])#'ts', 'all_nested', 'all_kfold', 'fs_nested_pt_kfold', 'fs_kfold_pt_nested'
-FS_CV_SPLIT_SIZE = np.array([2, 7, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) #2, 3, 5, 8, 13
+MODELS = np.array(['svm', 'logistic_regression', 'naive_bayes', 'knn', 'random_forest', 'decision_tree']) # 'svm', 'logistic_regression', 'naive_bayes', 'knn', 'random_forest', 'decision_tree'
+VALIDATION_TYPES = np.array(['ts', 'all_nested', 'all_kfold', 'fs_nested_pt_kfold', 'fs_kfold_pt_nested'])#'ts', 'all_nested', 'all_kfold', 'fs_nested_pt_kfold', 'fs_kfold_pt_nested'
+CV_SPLIT_SIZE = np.array([2, 7, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) #2, 3, 5, 8, 13
 PERFORMANCE_METRICS = np.array(['accuracy', 'balanced_accuracy', 'f1', 'precision', 'recall'])  # , 'balanced_accuracy', 'f1', 'precision', 'recall' ; use sklearn scoring parameters; , 'balanced_accuracy', 'top_k_accuracy', 'average_precision', 'neg_brier_score'
-PERFORMANCE_METRICS_TEST = ['test_' + i for i in PERFORMANCE_METRICS]
-# NUM_Metrics = len(...)
 
-FEATURE_SELECTOR = np.array(['rfe']) # , 'sequential'
+
+FEATURE_SELECTOR = np.array(['rfe', 'sequential']) # , 'sequential'
 FEATURE_SELECTION_FRAC = np.array([0.25, 0.5, 0.75, 1.0]) #np.linspace(0.1, 1, 2, endpoint=True)  # relevant for rfe and sequential, 10, 0.25, 0.5, 0.75, 1.0
 MAX_FEATURES = 14 # this is the maximum number of features for your dataset
 
 # parameter ranges for models
-PAR_SPLIT_SIZE = np.array([2, 7, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) 2, 3, 5, 8, 13
+PAR_SPLIT_SIZE = np.array([2, 7, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) 2, 3, 5, 8, 13, now: 7, 13
 par_grid = {'svm': {'C': np.logspace(-1, 7, num=9, base=2), 'gamma': np.logspace(1, -7, num=9, base=2)},
             'logistic_regression': {'C': np.logspace(0, 4, num=10, base=10), 'penalty': ['l1', 'l2']},
             'random_forest': {'n_estimators': [int(x) for x in np.linspace(start=5, stop=500, num=5, endpoint=True)],
@@ -51,6 +51,16 @@ par_grid = {'svm': {'C': np.logspace(-1, 7, num=9, base=2), 'gamma': np.logspace
             'knn': {'n_neighbors': np.linspace(1, 10, num=10, endpoint=True, dtype=int)},
             'naive_bayes': {'var_smoothing': np.logspace(0, -9, num=100)}}
 
+SCORING_METRICS = {
+    'accuracy': make_scorer(accuracy_score),
+    'balanced_accuracy': make_scorer(balanced_accuracy_score),
+    'f1': make_scorer(f1_score, average='weighted'),
+    'precision': make_scorer(precision_score, average='weighted'),
+    'recall': make_scorer(recall_score, average='weighted')
+}
+
+NUM_METRICS = len(SCORING_METRICS.keys())
+PERFORMANCE_METRICS_TEST = ['test_' + i for i in SCORING_METRICS.keys()]
 
 def select_features(estimator, features, target, sel_type, frac):
     if sel_type == 'rfe':
@@ -62,26 +72,34 @@ def select_features(estimator, features, target, sel_type, frac):
         selector = selector.fit(features, target)
         return selector.support_
 
-SCORING = {
-    'accuracy': 'accuracy',
-    'balanced_accuracy': 'balanced_accuracy',
-    'f1': make_scorer(f1_score, average='weighted'),
-    'precision': make_scorer(precision_score, average='weighted'),
-    'recall': make_scorer(recall_score, average='weighted')
-}
-
-NUM_METRICS = len(SCORING.keys())
 
 
+# def get_performance_metric(metric, target, prediction):
+#     if metric == 'accuracy':
+#         return metrics.accuracy_score(target, prediction)
+#     elif metric == 'balanced_accuracy':
+#         return metrics.balanced_accuracy_score(target, prediction)
+#     elif metric == 'f1':
+#         return metrics.f1_score(target, prediction, average='weighted')
+#     elif metric == 'precision':
+#         return metrics.precision_score(target, prediction, average='weighted')
+#     elif metric == 'recall':
+#         return metrics.recall_score(target, prediction, average='weighted')
+#     # elif metric == 'top_k_accuracy':
+#     #     return metrics.top_k_accuracy_score(target, prediction)
+#     # elif metric == 'average_precision':
+#     #     return metrics.average_precision_score(target, prediction)
+#     # elif metric == 'neg_brier_score':
+#     #     return metrics.brier_score_loss(target, prediction)
 
 
-def tune_parameters(estimator, features, target, param_grid, split_size):
+def tune_parameters(estimator, features, target, param_grid, split_size, main_metric):
     cross_val = StratifiedKFold(n_splits=split_size, shuffle=True)
     clf = GridSearchCV(estimator=estimator, param_grid=param_grid,
-                           cv=cross_val, scoring=SCORING, refit='accuracy')  # define a model with parameter tuning
+                       cv=cross_val, scoring=SCORING_METRICS, refit=main_metric)  # define a model with parameter tuning
     clf.fit(features, target)
     results = clf.cv_results_
-    return clf.best_params_, [results["mean_test_%s" % scorer][np.nonzero(results["rank_test_%s" % scorer] == 1)[0][0]] for scorer in SCORING.keys()]
+    return clf.best_params_, np.array([[results["mean_test_%s" % scorer][np.nonzero(results["rank_test_%s" % scorer] == 1)[0][0]] for scorer in SCORING_METRICS.keys()]])
 
 
 def read_data():
@@ -151,30 +169,11 @@ def select_parameters_estimator(name):
     else:
         return select_features_estimator(name)
 
-
 def select_validation_estimator(name):
     return select_parameters_estimator(name)
 
-def get_performance_metric(metric, target, prediction):
-    if metric == 'accuracy':
-        return metrics.accuracy_score(target, prediction)
-    elif metric == 'balanced_accuracy':
-        return metrics.balanced_accuracy_score(target, prediction)
-    elif metric == 'f1':
-        return metrics.f1_score(target, prediction, average='weighted')
-    elif metric == 'precision':
-        return metrics.precision_score(target, prediction, average='weighted')
-    elif metric == 'recall':
-        return metrics.recall_score(target, prediction, average='weighted')
-    elif metric == 'top_k_accuracy':
-        return metrics.top_k_accuracy_score(target, prediction)
-    elif metric == 'average_precision':
-        return metrics.average_precision_score(target, prediction)
-    elif metric == 'neg_brier_score':
-        return metrics.brier_score_loss(target, prediction)
-
-def measure_performance(target, prediction):
-    return np.array([[get_performance_metric(metric, target, prediction) for metric in PERFORMANCE_METRICS]])
+# def measure_performance(target, prediction):
+#     return np.array([[get_performance_metric(metric, target, prediction) for metric in SCORING_METRICS.keys()]])
 
 
     # if metric == 'accuracy':
@@ -202,8 +201,12 @@ def confidence_interval_gap(data, confidence):
     return h
 
 
+def measure_performances(model_object, X_to_predict, y_true):
+    return np.array([[score(model_object, X_to_predict, y_true) for score in SCORING_METRICS.values()]])
+
+
 @ray.remote
-def do_calc(model, sample_size, feature_selector, feature_selection_frac, validation_type, par_split_size, fs_cv_split_size, train_size):
+def do_calc(model, main_metric, sample_size, feature_selector, feature_selection_frac, validation_type, par_split_size, cv_split_size, train_size):
     performance = np.empty((ROUNDS,NUM_METRICS), float)
     for i in range(ROUNDS):
         j = 0
@@ -211,12 +214,13 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
         while j < 1:
             if tries >= 1:
                 entry = pd.DataFrame({'model': model,
+                          'main_metric': main_metric,
                           'sample_size': sample_size,
                           'feature_selector': feature_selector,
                           'num_feature_sel': ceil(feature_selection_frac * MAX_FEATURES),
                           'validation_type': validation_type,
                           'train_size': train_size,
-                          'fs_cv_split_size': fs_cv_split_size,
+                          'cv_split_size': cv_split_size,
                           'par_split_size': par_split_size,
                           'mean_performance': np.NaN,
                           'median_performance': np.NaN,
@@ -224,7 +228,7 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
                           'min_performance': np.NaN,
                           'lower_bound_confidence_interval': np.NaN,
                           'upper_bound_confidence_interval': np.NaN,
-                          'variance': np.NaN}, index=[0])
+                          'performance_variance': np.NaN}, index=[0])
                 entry.to_csv('output_entries', mode='a', index=False, header=False)
                 return entry
 
@@ -249,20 +253,20 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
                     X_train_sel = X_train.loc[:, feature_selection_mask]
                     X_test_sel = X_test.loc[:, feature_selection_mask]
 
-                    parameter = tune_parameters(select_parameters_estimator(model), X_train_sel,
-                                                y_train, par_grid[model], par_split_size)
-                    model_object = select_validation_estimator(model).set_params(
-                        **parameter)
-                    model_object.fit(X_train_sel, y_train)
-                    predictions = model_object.predict(X_test_sel)
+                    parameter, _ = tune_parameters(select_parameters_estimator(model), X_train_sel,
+                                                y_train, par_grid[model], par_split_size, main_metric)
+                    model_object = (select_validation_estimator(model).set_params(
+                        **parameter)).fit(X_train_sel, y_train)
+                    # predictions = model_object.predict(X_test_sel)
 
-                    performance[i] = measure_performance(y_test, predictions)
+                    performance[i] = measure_performances(model_object, X_test_sel, y_test)
+                    #performance[i] = measure_performance(y_test, predictions)
                     #np.put(performance, i, measure_performance(y_test, predictions))
                     #performance.append(measure_performance(performance_metric, predictions, y_test))
 
                 elif validation_type == 'all_nested':
-                    kf = StratifiedKFold(n_splits=fs_cv_split_size, shuffle=True)
-                    inner_perf = np.empty((fs_cv_split_size,NUM_METRICS), float)
+                    kf = StratifiedKFold(n_splits=cv_split_size, shuffle=True)
+                    inner_perf = np.empty((cv_split_size, NUM_METRICS), float)
 
                     c = 0
                     for train_index, test_index in kf.split(X, y):
@@ -277,16 +281,16 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
                         X_train_sel = X_train.loc[:, feature_selection_mask]
                         X_test_sel = X_test.loc[:, feature_selection_mask]
 
-                        parameter = tune_parameters(select_parameters_estimator(model),
+                        parameter, _ = tune_parameters(select_parameters_estimator(model),
                                                     X_train_sel,
                                                     y_train, par_grid[model],
-                                                    par_split_size)
-                        model_object = select_validation_estimator(model).set_params(
-                            **parameter)
-                        model_object.fit(X_train_sel, y_train)
-                        predictions = model_object.predict(X_test_sel)
+                                                    par_split_size, main_metric)
+                        model_object = (select_validation_estimator(model).set_params(
+                            **parameter)).fit(X_train_sel, y_train)
+                        # predictions = model_object.predict(X_test_sel)
 
-                        inner_perf[c] = measure_performance(y_test, predictions)
+                        inner_perf[c] = measure_performances(model_object, X_test_sel, y_test)
+                            #measure_performance(y_test, predictions)
                         c+=1
                         #inner_perf = np.append(inner_perf, measure_performance(performance_metric, predictions, y_test), axis=0)
                         #inner_perf.append(measure_performance(performance_metric, predictions, y_test))
@@ -301,26 +305,23 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
                         select_features_estimator(model),
                         X, y, feature_selector,
                         feature_selection_frac)
-
                     X_sel = X.loc[:, feature_selection_mask]
 
-                    parameter = tune_parameters(select_parameters_estimator(model), X_sel,
-                                                y, par_grid[model], par_split_size)
-                    model_object = select_validation_estimator(model).set_params(
-                        **parameter)
+                    parameter, results = tune_parameters(select_parameters_estimator(model), X_sel,
+                                                y, par_grid[model], par_split_size, main_metric)
 
-                    cv = StratifiedKFold(n_splits=fs_cv_split_size, shuffle=True)
-                    cv_res = cross_validate(model_object, X_sel, y,
-                                           cv=cv,
-                                           scoring=list(PERFORMANCE_METRICS))
-                    performance[i] = np.array([[np.mean(cv_res.get(x)) for x in PERFORMANCE_METRICS_TEST]])
-
+                    # so sinvoller?
+                    #model_object = select_validation_estimator(model).set_params(**parameter)
+                    #cv = StratifiedKFold(n_splits=fs_cv_split_size, shuffle=True)
+                    #cv_res = cross_validate(model_object, X_sel, y,cv=cv,scoring=SCORING_METRICS)
+                    #performance[i] = np.array([[np.mean(cv_res.get(x)) for x in PERFORMANCE_METRICS_TESTS]])
+                    performance[i] = results
                     #performance.append(cv_res)
 
                 elif validation_type == 'fs_nested_pt_kfold':
-                    kf = StratifiedKFold(n_splits=fs_cv_split_size, shuffle=True)
+                    kf = StratifiedKFold(n_splits=cv_split_size, shuffle=True)
 
-                    inner_perf = np.empty((fs_cv_split_size, NUM_METRICS), float)
+                    inner_perf = np.empty((cv_split_size, NUM_METRICS), float)
                     c = 0
                     for train_index, test_index in kf.split(X, y):
                         X_train, X_test = X.iloc[train_index], X.iloc[test_index]
@@ -335,16 +336,15 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
                         X_test_sel = X_test.loc[:, feature_selection_mask]
                         X_sel = X.loc[:, feature_selection_mask]
 
-                        parameter = tune_parameters(select_parameters_estimator(model),
+                        parameter, _ = tune_parameters(select_parameters_estimator(model),
                                                     X_sel,
-                                                    y, par_grid[model], par_split_size)
+                                                    y, par_grid[model], par_split_size, main_metric)
 
-                        model_object = select_validation_estimator(model).set_params(
-                            **parameter)
-                        model_object.fit(X_train_sel, y_train)
-                        predictions = model_object.predict(X_test_sel)
+                        model_object = (select_validation_estimator(model).set_params(**parameter)).fit(X_train_sel, y_train)
+                        # predictions = model_object.predict(X_test_sel)
 
-                        inner_perf[c] = measure_performance(y_test, predictions)
+                        inner_perf[c] = measure_performances(model_object, X_test_sel, y_test)
+                        #measure_performance(y_test, predictions)
                         #np.put(inner_perf, c, measure_performance(y_test, predictions))
                         c += 1
                         #inner_perf = np.append(inner_perf, measure_performance(performance_metric, predictions, y_test),axis=0)
@@ -361,8 +361,8 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
                         X, y, feature_selector,
                         feature_selection_frac)
 
-                    kf = StratifiedKFold(n_splits=fs_cv_split_size, shuffle=True)
-                    inner_perf = np.empty((fs_cv_split_size, NUM_METRICS), float)
+                    kf = StratifiedKFold(n_splits=cv_split_size, shuffle=True)
+                    inner_perf = np.empty((cv_split_size, NUM_METRICS), float)
 
                     c=0
                     for train_index, test_index in kf.split(X, y):
@@ -372,16 +372,15 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
                         X_train_sel = X_train.loc[:, feature_selection_mask]
                         X_test_sel = X_test.loc[:, feature_selection_mask]
 
-                        parameter = tune_parameters(select_parameters_estimator(model),
+                        parameter, _ = tune_parameters(select_parameters_estimator(model),
                                                     X_train_sel,
                                                     y_train, par_grid[model],
-                                                    par_split_size)
-                        model_object = select_validation_estimator(model).set_params(
-                            **parameter)
-                        model_object.fit(X_train_sel, y_train)
-                        predictions = model_object.predict(X_test_sel)
+                                                    par_split_size, main_metric)
+                        model_object = (select_validation_estimator(model).set_params(**parameter)).fit(X_train_sel, y_train)
+                        #predictions = model_object.predict(X_test_sel)
 
-                        inner_perf[c] = measure_performance(y_test, predictions)
+                        inner_perf[c] = measure_performances(model_object, X_test_sel, y_test)
+                            #measure_performance(y_test, predictions)
                         #np.put(inner_perf, c, measure_performance(y_test, predictions))
                         c += 1
                         #inner_perf.append(measure_performance(performance_metric, predictions, y_test))
@@ -406,12 +405,13 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
     # np.savetxt("foo.csv", a, delimiter=",")
 
     entry = pd.DataFrame([[model,
+                           main_metric,
                            sample_size,
                            feature_selector,
                            ceil(feature_selection_frac * MAX_FEATURES),
                            validation_type,
                            train_size,
-                           fs_cv_split_size,
+                           cv_split_size,
                            par_split_size,
                            np.round_(mean_performance, 3),
                            np.round_(median_performance, 3),
@@ -420,10 +420,11 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
                            np.round_(lower_bound_confidence_interval, 3),
                            np.round_(upper_bound_confidence_interval, 3),
                            np.round_(variance, 3)]],
-                         columns=['model', 'sample_size', 'feature_selector',
+                         columns=['model', 'main_metric', 'sample_size', 'feature_selector',
                                    'num_feature_sel', 'validation_type', 'train_size',
-                                   'fs_cv_split_size', 'par_split_size', 'mean_performance', 'median_performance',
-                                   'max_performance', 'min_performance', 'lower_bound_confidence_interval', 'upper_bound_confidence_interval', 'variance'])
+                                   'cv_split_size', 'par_split_size', 'mean_performance', 'median_performance',
+                                   'max_performance', 'min_performance', 'lower_bound_confidence_interval',
+                                  'upper_bound_confidence_interval', 'performance_variance'])
 
     # pd.DataFrame({'model': model,
     #               'sample_size': sample_size,
@@ -443,7 +444,7 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, valida
     return entry
 
 
-ray.init(ignore_reinit_error=True, num_cpus= 2) #ignore_reinit_error=True, num_cpus= 128
+ray.init(ignore_reinit_error=True, num_cpus= 128) #ignore_reinit_error=True, num_cpus= 128
 
 if __name__ == '__main__':
     data = read_data()
@@ -466,32 +467,36 @@ if __name__ == '__main__':
     # middle = data[(data.age >= 50) & (data.age < 65)]
     # elder = data[(data.age >= 65)]
 
-    output = pd.DataFrame(columns=['model', 'sample_size', 'feature_selector',
+    output = pd.DataFrame(columns=['model', 'main_metric', 'sample_size', 'feature_selector',
                                    'num_feature_sel', 'validation_type', 'train_size',
-                                   'fs_cv_split_size', 'par_split_size', 'mean_performance', 'median_performance',
+                                   'cv_split_size', 'par_split_size', 'mean_performance', 'median_performance',
                                    'max_performance', 'min_performance', 'lower_bound_confidence_interval',
-                                   'upper_bound_confidence_interval', 'variance'])
+                                   'upper_bound_confidence_interval', 'performance_variance'])
 
 
     result = []
     for model in MODELS:
-            for sample_size in SAMPLE_SIZES:
-                for feature_selector in FEATURE_SELECTOR:
+        for main_metric in SCORING_METRICS.keys():
+            for feature_selector in FEATURE_SELECTOR:
+                for sample_size in SAMPLE_SIZES:
                     for feature_selection_frac in FEATURE_SELECTION_FRAC:
                         for validation_type in VALIDATION_TYPES:
                             for par_split_size in PAR_SPLIT_SIZE:
                                 if validation_type == 'ts':
                                     train_size_list = TRAIN_SIZE
-                                    fs_cv_split_size_list = np.array([np.NaN])
+                                    cv_split_size_list = np.array([np.NaN])
+                                elif validation_type == 'all_kfold':
+                                    train_size_list = np.array([np.NaN])
+                                    cv_split_size_list = np.array([np.NaN])
                                 else:
                                     train_size_list = np.array([np.NaN])
-                                    fs_cv_split_size_list = FS_CV_SPLIT_SIZE
+                                    cv_split_size_list = CV_SPLIT_SIZE
 
-                                for fs_cv_split_size in fs_cv_split_size_list:
+                                for cv_split_size in cv_split_size_list:
                                     for train_size in train_size_list:
-                                        result.append(do_calc.remote(model, sample_size, feature_selector, feature_selection_frac,
-                                                               validation_type,
-                                                               par_split_size, fs_cv_split_size, train_size))
+                                        result.append(do_calc.remote(model, main_metric, sample_size, feature_selector, feature_selection_frac,
+                                                                     validation_type,
+                                                                     par_split_size, cv_split_size, train_size))
                                         #with pd.option_context('display.max_rows', None, 'display.max_columns', None):
                                         #    print(entry)
 
