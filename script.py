@@ -1,81 +1,87 @@
 import os
-from itertools import chain, combinations
 from math import ceil
 import numpy as np
 import pandas as pd
+import scipy
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import RFE, SequentialFeatureSelector
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, top_k_accuracy_score, average_precision_score, \
-    brier_score_loss
+from sklearn import metrics
+from sklearn.metrics import make_scorer, f1_score, recall_score, precision_score
 from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold, cross_validate, KFold
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
-from statistics import mean, median
-from scipy import stats
 from sklearn.tree import DecisionTreeClassifier
 import ray
 
 NAN_REPLACEMENT = 'knn'  # options: mean, median, knn
 NAN_KNN_NEIGHBORS = 5  # should only be used, when knn for NaN replacement selected
 
-def powerset(iterable):
-    s = list(iterable)
-    return chain.from_iterable(combinations(s, r) for r in range(len(s)+1))
-
-
-SAMPLE_SELECTION = list(powerset([]))# powerset(['iqr', 'z_score'])  # options: iqr, z_score
-SAMPLE_SELECTION_Q1 = 0.05  # adjust here if iqr chosen
-SAMPLE_SELECTION_Q3 = 0.95
-SAMPLE_SELECTION_Z = 3  # adjust if z_score chosen
 
 # training & validation
 ROUNDS = 50 #50
-SAMPLE_SIZES = np.array([0.03, 0.05, 0.1, 0.25, 0.5, 1.0]) # np.linspace(0.05, 0.5, 2, endpoint=True) #1, 20
-TRAIN_SIZE = np.array([0.3, 0.6, 0.8, 0.9]) # np.linspace(0.1, 0.6, 2, endpoint=False) #1, 2
-VALIDATION_TYPES = np.array(['ts', 'all_nested', 'all_kfold', 'fs_nested_pt_kfold', 'fs_kfold_pt_nested']) #  ['ts', 'all_nested', 'all_kfold', 'fs_nested_pt_kfold', 'fs_kfold_pt_nested']  # pt: parameter tuning
-FS_CV_SPLIT_SIZE = np.array([2, 3, 5, 8]) # np.linspace(2, 10, 2, endpoint=True).astype(int) #5
-MODELS = np.array(['svm']) # 'knn', 'naive_bayes', 'random_forest', 'decision_tree', , 'logistic_regression'
-PERFORMANCE_METRICS = np.array(['accuracy'])  # use sklearn scoring parameters; , 'balanced_accuracy', 'top_k_accuracy', 'average_precision', 'neg_brier_score'
+SAMPLE_SIZES = np.array([0.03]) # np.linspace(0.05, 0.5, 2, endpoint=True) # 0.05, 0.1, 0.25, 0.5, 1.0
+TRAIN_SIZE = np.array([0.3, 0.6, 0.8, 0.9]) # np.linspace(0.1, 0.6, 2, endpoint=False) # 0.3, 0.6, 0.8, 0.9
+MODELS = np.array(['svm']) # 'svm', 'logistic_regression', 'naive_bayes', 'knn', 'random_forest', 'decision_tree'
+VALIDATION_TYPES = np.array(['all_kfold'])#'ts', 'all_nested', 'all_kfold', 'fs_nested_pt_kfold', 'fs_kfold_pt_nested'
+FS_CV_SPLIT_SIZE = np.array([2, 7, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) #2, 3, 5, 8, 13
+PERFORMANCE_METRICS = np.array(['accuracy', 'balanced_accuracy', 'f1', 'precision', 'recall'])  # , 'balanced_accuracy', 'f1', 'precision', 'recall' ; use sklearn scoring parameters; , 'balanced_accuracy', 'top_k_accuracy', 'average_precision', 'neg_brier_score'
+PERFORMANCE_METRICS_TEST = ['test_' + i for i in PERFORMANCE_METRICS]
+# NUM_Metrics = len(...)
+
 FEATURE_SELECTOR = np.array(['rfe']) # , 'sequential'
-FEATURE_SELECTION_FRAC = np.array([0.25 , 0.5, 0.75, 1.0]) #np.linspace(0.1, 1, 2, endpoint=True)  # relevant for rfe and sequential, 10
+FEATURE_SELECTION_FRAC = np.array([0.25, 0.5, 0.75, 1.0]) #np.linspace(0.1, 1, 2, endpoint=True)  # relevant for rfe and sequential, 10, 0.25, 0.5, 0.75, 1.0
+MAX_FEATURES = 14 # this is the maximum number of features for your dataset
 
 # parameter ranges for models
-PAR_SPLIT_SIZE = np.array([2, 3, 5, 8]) # np.linspace(2, 10, 2, endpoint=True).astype(int)
-par_grid = {'svm': {'C': np.logspace(1, 7, num=7, base=2), 'gamma': np.logspace(-1, -7, num=7, base=2)},
+PAR_SPLIT_SIZE = np.array([2, 7, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) 2, 3, 5, 8, 13
+par_grid = {'svm': {'C': np.logspace(-1, 7, num=9, base=2), 'gamma': np.logspace(1, -7, num=9, base=2)},
             'logistic_regression': {'C': np.logspace(0, 4, num=10, base=10), 'penalty': ['l1', 'l2']},
-            'random_forest': {'n_estimators': [int(x) for x in np.linspace(start=200, stop=2000, num=10)],
+            'random_forest': {'n_estimators': [int(x) for x in np.linspace(start=5, stop=500, num=5, endpoint=True)],
                               'max_depth': [
-                                  [int(x) for x in np.linspace(10, 100, num=10, endpoint=True)].extend([None, 'sqrt'])],
-                              'min_samples_split': [2, 5, 10],
-                              'min_samples_leaf': [1, 2, 4],
+                                  [int(x) for x in np.linspace(10, 100, num=5, endpoint=True)].extend([None, 'sqrt'])],
+                              'min_samples_split': [2, 5],
+                              'min_samples_leaf': [1, 2],
                               'bootstrap': [True, False]},
             'decision_tree': {'max_depth': [[int(x) for x in np.linspace(10, 100, num=10, endpoint=True)].append(None)],
-                              'min_samples_split': [2, 5, 10],
-                              'min_samples_leaf': [1, 2, 4]},
+                              'min_samples_split': [2, 5, 10], #5,
+                              'min_samples_leaf': [1, 2, 4]}, #2
             'knn': {'n_neighbors': np.linspace(1, 10, num=10, endpoint=True, dtype=int)},
             'naive_bayes': {'var_smoothing': np.logspace(0, -9, num=100)}}
 
 
 def select_features(estimator, features, target, sel_type, frac):
     if sel_type == 'rfe':
-        selector = RFE(estimator, n_features_to_select=ceil(frac * len(features.columns)), step=1)
+        selector = RFE(estimator, n_features_to_select=ceil(frac * MAX_FEATURES), step=1)
         selector = selector.fit(features, target)
         return selector.support_
     elif sel_type == 'sequential':
-        selector = SequentialFeatureSelector(estimator, n_features_to_select=ceil(frac * len(features.columns)))
+        selector = SequentialFeatureSelector(estimator, n_features_to_select=ceil(frac * MAX_FEATURES))
         selector = selector.fit(features, target)
         return selector.support_
+
+SCORING = {
+    'accuracy': 'accuracy',
+    'balanced_accuracy': 'balanced_accuracy',
+    'f1': make_scorer(f1_score, average='weighted'),
+    'precision': make_scorer(precision_score, average='weighted'),
+    'recall': make_scorer(recall_score, average='weighted')
+}
+
+NUM_METRICS = len(SCORING.keys())
+
+
 
 
 def tune_parameters(estimator, features, target, param_grid, split_size):
     cross_val = StratifiedKFold(n_splits=split_size, shuffle=True)
     clf = GridSearchCV(estimator=estimator, param_grid=param_grid,
-                           cv=cross_val)  # define a model with parameter tuning
+                           cv=cross_val, scoring=SCORING, refit='accuracy')  # define a model with parameter tuning
     clf.fit(features, target)
-    return clf.best_params_
+    results = clf.cv_results_
+    return clf.best_params_, [results["mean_test_%s" % scorer][np.nonzero(results["rank_test_%s" % scorer] == 1)[0][0]] for scorer in SCORING.keys()]
 
 
 def read_data():
@@ -120,21 +126,6 @@ def replace_nan(data_to_process):
         return pd.DataFrame(imputer.fit_transform(data_to_process), columns=data_to_process.columns)
 
 
-def select_samples(data_to_process, sample_selection):
-    selected_data = data_to_process
-    for selection_type in sample_selection:
-        if selection_type == 'iqr':
-            q1 = selected_data.quantile(SAMPLE_SELECTION_Q1)
-            q3 = selected_data.quantile(SAMPLE_SELECTION_Q3)
-            iqr = q3 - q1
-            selected_data = selected_data[~((selected_data < (q1 - 1.5 * iqr)) |
-                                            (selected_data > (q1 + 1.5 * iqr))).any(axis=1)]
-        elif selection_type == 'z_score':
-            z = np.abs(stats.zscore(selected_data))
-            selected_data = selected_data[np.logical_or(z < SAMPLE_SELECTION_Z, z.isna()).all(axis=1)]
-    return selected_data
-
-
 def select_features_estimator(name):
     if name == 'svm':
         return SVC(kernel='linear')
@@ -155,69 +146,96 @@ def select_parameters_estimator(name):
         return GaussianNB()
     elif name == 'knn':
         return KNeighborsClassifier()
+    elif name == 'svm':
+        return SVC(kernel='rbf')
     else:
         return select_features_estimator(name)
 
 
 def select_validation_estimator(name):
-    if name == 'svm':
-        return SVC()
-    else:
-        return select_parameters_estimator(name)
+    return select_parameters_estimator(name)
 
-
-def measure_performance(metric, prediction, target):
+def get_performance_metric(metric, target, prediction):
     if metric == 'accuracy':
-        return accuracy_score(prediction, target)
+        return metrics.accuracy_score(target, prediction)
     elif metric == 'balanced_accuracy':
-        return balanced_accuracy_score(prediction, target)
+        return metrics.balanced_accuracy_score(target, prediction)
+    elif metric == 'f1':
+        return metrics.f1_score(target, prediction, average='weighted')
+    elif metric == 'precision':
+        return metrics.precision_score(target, prediction, average='weighted')
+    elif metric == 'recall':
+        return metrics.recall_score(target, prediction, average='weighted')
     elif metric == 'top_k_accuracy':
-        return top_k_accuracy_score(prediction, target)
+        return metrics.top_k_accuracy_score(target, prediction)
     elif metric == 'average_precision':
-        return average_precision_score(prediction, target)
+        return metrics.average_precision_score(target, prediction)
     elif metric == 'neg_brier_score':
-        return brier_score_loss(prediction, target)
+        return metrics.brier_score_loss(target, prediction)
+
+def measure_performance(target, prediction):
+    return np.array([[get_performance_metric(metric, target, prediction) for metric in PERFORMANCE_METRICS]])
+
+
+    # if metric == 'accuracy':
+    #     return metrics.accuracy_score(target, prediction)
+    # elif metric == 'balanced_accuracy':
+    #     return metrics.balanced_accuracy_score(target, prediction)
+    # elif metric == 'f1':
+    #     return metrics.f1_score(target, prediction, average='weighted')
+    # elif metric == 'precision':
+    #     return metrics.precision_score(target, prediction, average='weighted')
+    # elif metric == 'recall':
+    #     return metrics.recall_score(target, prediction, average='weighted')
+    # elif metric == 'top_k_accuracy':
+    #     return top_k_accuracy_score(prediction, target)
+    # elif metric == 'average_precision':
+    #     return average_precision_score(prediction, target)
+    # elif metric == 'neg_brier_score':
+    #     return brier_score_loss(prediction, target)
+
+
+def confidence_interval_gap(data, confidence):
+    row, column = data.shape
+    se = scipy.stats.sem(data, axis=0)
+    h = se * scipy.stats.t.ppf((1 + confidence) / 2., row -1)
+    return h
 
 
 @ray.remote
-def do_calc(model, sample_size, feature_selector, feature_selection_frac, performance_metric, validation_type, sample_selection, par_split_size, fs_cv_split_size, train_size):
-    performance = []
-    num_sample_selected = []
+def do_calc(model, sample_size, feature_selector, feature_selection_frac, validation_type, par_split_size, fs_cv_split_size, train_size):
+    performance = np.empty((ROUNDS,NUM_METRICS), float)
     for i in range(ROUNDS):
         j = 0
         tries = 0
         while j < 1:
             if tries >= 1:
                 entry = pd.DataFrame({'model': model,
-                          'sample_size': int(sample_size * len(data)),
-                          'sample_selectors': ' '.join(sample_selection),
-                          'sample_size_selected': np.NaN,
+                          'sample_size': sample_size,
                           'feature_selector': feature_selector,
-                          'num_feature_sel': ceil(feature_selection_frac * len(data.columns)),
-                          'performance_metric': performance_metric,
+                          'num_feature_sel': ceil(feature_selection_frac * MAX_FEATURES),
                           'validation_type': validation_type,
                           'train_size': train_size,
-                          'fs_cv_split_size': fs_cv_split_size_list,
+                          'fs_cv_split_size': fs_cv_split_size,
                           'par_split_size': par_split_size,
                           'mean_performance': np.NaN,
                           'median_performance': np.NaN,
                           'max_performance': np.NaN,
-                          'min_performance': np.NaN}, index=[0])
-                entry.to_csv('output_entries_new', mode='a', index=False, header=False)
+                          'min_performance': np.NaN,
+                          'lower_bound_confidence_interval': np.NaN,
+                          'upper_bound_confidence_interval': np.NaN,
+                          'variance': np.NaN}, index=[0])
+                entry.to_csv('output_entries', mode='a', index=False, header=False)
                 return entry
 
             try:
                 sample = data.groupby('target', group_keys=False).apply(
-                    lambda x: x.sample(n=ceil(sample_size*len(x))))
-                #sample_selected = select_samples(sample, sample_selection)
-                sample_selected = sample
+                    lambda x: x.sample(frac=sample_size))
 
-                X = sample_selected.drop('target', axis=1)
-                y = sample_selected['target']
+                X = sample.drop('target', axis=1)
+                y = sample['target']
 
-                num_sample = len(sample)
-                num_sample_selected.append(len(sample_selected))
-
+                # print(model, sample_size, feature_selector, feature_selection_frac, validation_type, par_split_size, fs_cv_split_size, train_size, i, j, tries)
                 if validation_type == 'ts':
                     X_train, X_test, y_train, y_test = train_test_split(X, y,
                                                                         train_size=train_size,
@@ -227,23 +245,26 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, perfor
                         select_features_estimator(model),
                         X_train, y_train, feature_selector,
                         feature_selection_frac)
+
                     X_train_sel = X_train.loc[:, feature_selection_mask]
                     X_test_sel = X_test.loc[:, feature_selection_mask]
 
-                    parameter = tune_parameters(select_parameters_estimator(model), X_train,
+                    parameter = tune_parameters(select_parameters_estimator(model), X_train_sel,
                                                 y_train, par_grid[model], par_split_size)
                     model_object = select_validation_estimator(model).set_params(
                         **parameter)
                     model_object.fit(X_train_sel, y_train)
                     predictions = model_object.predict(X_test_sel)
 
-                    performance.append(
-                        measure_performance(performance_metric, predictions, y_test))
+                    performance[i] = measure_performance(y_test, predictions)
+                    #np.put(performance, i, measure_performance(y_test, predictions))
+                    #performance.append(measure_performance(performance_metric, predictions, y_test))
 
                 elif validation_type == 'all_nested':
                     kf = StratifiedKFold(n_splits=fs_cv_split_size, shuffle=True)
-                    inner_perf = []
+                    inner_perf = np.empty((fs_cv_split_size,NUM_METRICS), float)
 
+                    c = 0
                     for train_index, test_index in kf.split(X, y):
                         X_train, X_test = X.iloc[train_index], X.iloc[test_index]
                         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
@@ -257,7 +278,7 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, perfor
                         X_test_sel = X_test.loc[:, feature_selection_mask]
 
                         parameter = tune_parameters(select_parameters_estimator(model),
-                                                    X_train,
+                                                    X_train_sel,
                                                     y_train, par_grid[model],
                                                     par_split_size)
                         model_object = select_validation_estimator(model).set_params(
@@ -265,16 +286,22 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, perfor
                         model_object.fit(X_train_sel, y_train)
                         predictions = model_object.predict(X_test_sel)
 
-                        inner_perf.append(
-                            measure_performance(performance_metric, predictions, y_test))
+                        inner_perf[c] = measure_performance(y_test, predictions)
+                        c+=1
+                        #inner_perf = np.append(inner_perf, measure_performance(performance_metric, predictions, y_test), axis=0)
+                        #inner_perf.append(measure_performance(performance_metric, predictions, y_test))
 
-                    performance.append(mean(inner_perf))
+                    performance[i] = inner_perf.mean(axis=0)
+                    # np.put(performance, i, inner_perf.mean(axis=0))
+                    #performance = np.append(performance, inner_perf.mean(axis=0), axis=0)
+                    #performance.append(mean(inner_perf))
 
                 elif validation_type == 'all_kfold':
                     feature_selection_mask = select_features(
                         select_features_estimator(model),
                         X, y, feature_selector,
                         feature_selection_frac)
+
                     X_sel = X.loc[:, feature_selection_mask]
 
                     parameter = tune_parameters(select_parameters_estimator(model), X_sel,
@@ -282,17 +309,19 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, perfor
                     model_object = select_validation_estimator(model).set_params(
                         **parameter)
 
-                    cv = StratifiedKFold(n_splits=fs_cv_split_size,
-                                                              shuffle=True)
+                    cv = StratifiedKFold(n_splits=fs_cv_split_size, shuffle=True)
                     cv_res = cross_validate(model_object, X_sel, y,
                                            cv=cv,
-                                           scoring=performance_metric)['test_score'].mean()
-                    performance.append(cv_res)
+                                           scoring=list(PERFORMANCE_METRICS))
+                    performance[i] = np.array([[np.mean(cv_res.get(x)) for x in PERFORMANCE_METRICS_TEST]])
+
+                    #performance.append(cv_res)
 
                 elif validation_type == 'fs_nested_pt_kfold':
                     kf = StratifiedKFold(n_splits=fs_cv_split_size, shuffle=True)
-                    inner_perf = []
 
+                    inner_perf = np.empty((fs_cv_split_size, NUM_METRICS), float)
+                    c = 0
                     for train_index, test_index in kf.split(X, y):
                         X_train, X_test = X.iloc[train_index], X.iloc[test_index]
                         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
@@ -315,10 +344,16 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, perfor
                         model_object.fit(X_train_sel, y_train)
                         predictions = model_object.predict(X_test_sel)
 
-                        inner_perf.append(
-                            measure_performance(performance_metric, predictions, y_test))
+                        inner_perf[c] = measure_performance(y_test, predictions)
+                        #np.put(inner_perf, c, measure_performance(y_test, predictions))
+                        c += 1
+                        #inner_perf = np.append(inner_perf, measure_performance(performance_metric, predictions, y_test),axis=0)
+                        # inner_perf.append(measure_performance(performance_metric, predictions, y_test))
 
-                    performance.append(mean(inner_perf))
+                    performance[i] = inner_perf.mean(axis=0)
+                    #np.put(performance, i, inner_perf.mean(axis=0))
+                    # performance = np.append(performance, inner_perf.mean(axis=0), axis=0)
+                    #performance.append(mean(inner_perf))
 
                 elif validation_type == 'fs_kfold_pt_nested':
                     feature_selection_mask = select_features(
@@ -327,8 +362,9 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, perfor
                         feature_selection_frac)
 
                     kf = StratifiedKFold(n_splits=fs_cv_split_size, shuffle=True)
-                    inner_perf = []
+                    inner_perf = np.empty((fs_cv_split_size, NUM_METRICS), float)
 
+                    c=0
                     for train_index, test_index in kf.split(X, y):
                         X_train, X_test = X.iloc[train_index], X.iloc[test_index]
                         y_train, y_test = y.iloc[train_index], y.iloc[test_index]
@@ -340,52 +376,80 @@ def do_calc(model, sample_size, feature_selector, feature_selection_frac, perfor
                                                     X_train_sel,
                                                     y_train, par_grid[model],
                                                     par_split_size)
-
                         model_object = select_validation_estimator(model).set_params(
                             **parameter)
                         model_object.fit(X_train_sel, y_train)
                         predictions = model_object.predict(X_test_sel)
 
-                        inner_perf.append(
-                            measure_performance(performance_metric, predictions, y_test))
+                        inner_perf[c] = measure_performance(y_test, predictions)
+                        #np.put(inner_perf, c, measure_performance(y_test, predictions))
+                        c += 1
+                        #inner_perf.append(measure_performance(performance_metric, predictions, y_test))
 
-                    performance.append(mean(inner_perf))
+                    performance[i] = inner_perf.mean(axis=0)
+                    # np.put(performance, i, inner_perf.mean(axis=0))
+                    #performance = np.append(performance, inner_perf.mean(axis=0), axis=0)
                 j = 1
             except:
                 tries += 1
-                j = 0
 
+    mean_performance = np.mean(performance, axis = 0)
+    gap = confidence_interval_gap(performance, 0.95)
+    lower_bound_confidence_interval = mean_performance - gap
+    upper_bound_confidence_interval = mean_performance + gap
+    median_performance = np.median(performance, axis=0)
+    max_performance = np.max(performance, axis=0)
+    min_performance = np.min(performance, axis=0)
+    variance = np.var(performance, axis=0)
 
-    mean_performance = mean(performance)
-    median_performance = median(performance)
-    max_performance = max(performance)
-    min_performance = min(performance)
+    # a = np.array([model, sample_size, feature_selector, feature_selection_frac, performance_metric, validation_type, train_size, fs_cv_split_size, par_split_size, mean_performance, median_performance, max_performance, min_performance])
+    # np.savetxt("foo.csv", a, delimiter=",")
 
-    entry = pd.DataFrame({'model': model,
-                          'sample_size': num_sample,
-                          'sample_selectors': ' '.join(sample_selection),
-                          'sample_size_selected': mean(num_sample_selected),
-                          'feature_selector': feature_selector,
-                          'num_feature_sel': ceil(feature_selection_frac * len(data.columns)),
-                          'performance_metric': performance_metric,
-                          'validation_type': validation_type,
-                          'train_size': train_size,
-                          'fs_cv_split_size': fs_cv_split_size_list,
-                          'par_split_size': par_split_size,
-                          'mean_performance': "%.3f" % round(mean_performance, 2),
-                          'median_performance': "%.3f" % round(median_performance, 2),
-                          'max_performance': "%.3f" % round(max_performance, 2),
-                          'min_performance': "%.3f" % round(min_performance, 2)}, index=[0])
-    entry.to_csv('output_entries_new', mode='a', index=False, header=False)
+    entry = pd.DataFrame([[model,
+                           sample_size,
+                           feature_selector,
+                           ceil(feature_selection_frac * MAX_FEATURES),
+                           validation_type,
+                           train_size,
+                           fs_cv_split_size,
+                           par_split_size,
+                           np.round_(mean_performance, 3),
+                           np.round_(median_performance, 3),
+                           np.round_(max_performance, 3),
+                           np.round_(min_performance, 3),
+                           np.round_(lower_bound_confidence_interval, 3),
+                           np.round_(upper_bound_confidence_interval, 3),
+                           np.round_(variance, 3)]],
+                         columns=['model', 'sample_size', 'feature_selector',
+                                   'num_feature_sel', 'validation_type', 'train_size',
+                                   'fs_cv_split_size', 'par_split_size', 'mean_performance', 'median_performance',
+                                   'max_performance', 'min_performance', 'lower_bound_confidence_interval', 'upper_bound_confidence_interval', 'variance'])
+
+    # pd.DataFrame({'model': model,
+    #               'sample_size': sample_size,
+    #               'feature_selector': feature_selector,
+    #               'num_feature_sel': ceil(feature_selection_frac * (len(data.columns) - 1)),
+    #               'performance_metric': performance_metric,
+    #               'validation_type': validation_type,
+    #               'train_size': train_size,
+    #               'fs_cv_split_size': fs_cv_split_size,
+    #               'par_split_size': par_split_size,
+    #               'mean_performance': "%.3f" % round(mean_performance, 3),
+    #               'median_performance': "%.3f" % round(median_performance, 3),
+    #               'max_performance': "%.3f" % round(max_performance, 3),
+    #               'min_performance': "%.3f" % round(min_performance, 3)}, index=[0])
+
+    entry.to_csv('output_entries', mode='a', index=False, header=False)
     return entry
 
 
-ray.init(ignore_reinit_error=True, num_cpus= 128) #ignore_reinit_error=True, num_cpus= 128
+ray.init(ignore_reinit_error=True, num_cpus= 2) #ignore_reinit_error=True, num_cpus= 128
 
 if __name__ == '__main__':
     data = read_data()
 
-    data_without_nan = data.dropna()
+
+    # data_without_nan = data.dropna()
     # customize here for your output
     # X_data_without_nan = data_without_nan.drop('target', axis=1)
     # y_data_without_nan = data_without_nan['target']
@@ -395,43 +459,43 @@ if __name__ == '__main__':
                         'restecg': float, 'thalach': float, 'exang': float, 'oldpeak': float, 'slope': float,
                         'ca': float, 'thal': float, 'location': int, 'target': int})
 
-    male = data['sex'] = 1.0
-    young = data[(data.age < 50)]
-    middle = data[(data.age >= 50) & (data.age < 65)]
-    elder = data[(data.age >= 65)]
+    # data.replace({'target': [1,2,3,4]}, value=1, inplace=True) # making it binary
+    #
+    # male = data[data['sex'] == 1.0]
+    # young = data[(data.age < 50)]
+    # middle = data[(data.age >= 50) & (data.age < 65)]
+    # elder = data[(data.age >= 65)]
 
-    output = pd.DataFrame(columns=['model', 'sample_size', 'sample_selectors', 'sample_size_selected', 'feature_selector',
-                                   'num_feature_sel', 'performance_metric', 'validation_type', 'train_size',
+    output = pd.DataFrame(columns=['model', 'sample_size', 'feature_selector',
+                                   'num_feature_sel', 'validation_type', 'train_size',
                                    'fs_cv_split_size', 'par_split_size', 'mean_performance', 'median_performance',
-                                   'max_performance', 'min_performance'])
+                                   'max_performance', 'min_performance', 'lower_bound_confidence_interval',
+                                   'upper_bound_confidence_interval', 'variance'])
+
 
     result = []
     for model in MODELS:
-        for sample_size in SAMPLE_SIZES:
-            for sample_selection in SAMPLE_SELECTION:
+            for sample_size in SAMPLE_SIZES:
                 for feature_selector in FEATURE_SELECTOR:
                     for feature_selection_frac in FEATURE_SELECTION_FRAC:
-                        for performance_metric in PERFORMANCE_METRICS:
-                            for validation_type in VALIDATION_TYPES:
-                                for par_split_size in PAR_SPLIT_SIZE:
-                                    if validation_type == 'ts':
-                                        train_size_list = TRAIN_SIZE
-                                        fs_cv_split_size_list = np.array([np.NaN])
-                                    else:
-                                        train_size_list = np.array([np.NaN])
-                                        fs_cv_split_size_list = FS_CV_SPLIT_SIZE
-                                    for fs_cv_split_size in fs_cv_split_size_list:
-                                        for train_size in train_size_list:
-                                            # output = pd.concat([output, ray.get(do_calc.remote(model, sample_size, feature_selector, feature_selection_frac, performance_metric, validation_type, sample_selection, par_split_size, fs_cv_split_size, train_size, X_data_without_nan, y_data_without_nan))], ignore_index=True)
-                                            #ray.get(do_calc.remote(model, sample_size, feature_selector, feature_selection_frac, performance_metric, validation_type, sample_selection, par_split_size, fs_cv_split_size, train_size, X_data_without_nan, y_data_without_nan))
-                                            result.append(do_calc.remote(model, sample_size, feature_selector, feature_selection_frac,
-                                                                   performance_metric, validation_type, sample_selection,
-                                                                   par_split_size, fs_cv_split_size, train_size))
-                                            #with pd.option_context('display.max_rows', None, 'display.max_columns', None):
-                                            #    print(entry)
-                                            #output = pd.concat([output, entry], ignore_index=True)
+                        for validation_type in VALIDATION_TYPES:
+                            for par_split_size in PAR_SPLIT_SIZE:
+                                if validation_type == 'ts':
+                                    train_size_list = TRAIN_SIZE
+                                    fs_cv_split_size_list = np.array([np.NaN])
+                                else:
+                                    train_size_list = np.array([np.NaN])
+                                    fs_cv_split_size_list = FS_CV_SPLIT_SIZE
+
+                                for fs_cv_split_size in fs_cv_split_size_list:
+                                    for train_size in train_size_list:
+                                        result.append(do_calc.remote(model, sample_size, feature_selector, feature_selection_frac,
+                                                               validation_type,
+                                                               par_split_size, fs_cv_split_size, train_size))
+                                        #with pd.option_context('display.max_rows', None, 'display.max_columns', None):
+                                        #    print(entry)
 
     ready, not_ready = ray.wait(result, num_returns=len(result), timeout=None)
     for f in ready:
         output = pd.concat([output, ray.get(f)], ignore_index=True)
-    output.to_csv('output_new', index=False)
+    output.to_csv('output', index=False)
