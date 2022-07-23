@@ -1,5 +1,4 @@
 import os
-from math import ceil
 import numpy as np
 import pandas as pd
 import scipy
@@ -7,7 +6,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import RFE, SequentialFeatureSelector
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn import metrics
 from sklearn.metrics import make_scorer, f1_score, recall_score, precision_score, accuracy_score, \
     balanced_accuracy_score
 from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold, cross_validate, KFold
@@ -16,29 +14,32 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 import ray
+import warnings
 
 NAN_REPLACEMENT = 'knn'  # options: mean, median, knn
 NAN_KNN_NEIGHBORS = 5  # should only be used, when knn for NaN replacement selected
 
 
+ray.init(ignore_reinit_error=True, num_cpus=128) #ignore_reinit_error=True, num_cpus= 128
+
 # training & validation
-ROUNDS = 50 #50
-SAMPLE_SIZES = np.array([0.03, .05, 0.1, 0.25, 0.5, 1.0]) # np.linspace(0.05, 0.5, 2, endpoint=True) # 0.03, 0.05, 0.1, 0.25, 0.5, 1.0
-TRAIN_SIZE = np.array([0.3, 0.6, 0.8, 0.9]) # np.linspace(0.1, 0.6, 2, endpoint=False) # 0.3, 0.6, 0.8, 0.9
-MODELS = np.array(['svm', 'logistic_regression', 'naive_bayes', 'knn', 'random_forest', 'decision_tree']) # 'svm', 'logistic_regression', 'naive_bayes', 'knn', 'random_forest', 'decision_tree'
+ROUNDS = 50
+SAMPLE_SIZES = np.array([0.03, 0.05, 0.1, 0.25, 0.5, 1.0]) # np.linspace(0.05, 0.5, 2, endpoint=True) # 0.03, 0.05, 0.1, 0.25, 0.5, 1.0
+TRAIN_SIZE = np.array([0.6, 0.8, 0.9]) # np.linspace(0.1, 0.6, 2, endpoint=False) # 0.3, 0.6, 0.8, 0.9
+MODELS = np.array(['svm', 'logistic_regression']) # 'svm', 'logistic_regression', 'naive_bayes', 'knn', 'random_forest', 'decision_tree'
 VALIDATION_TYPES = np.array(['ts', 'all_nested', 'all_kfold', 'fs_nested_pt_kfold', 'fs_kfold_pt_nested'])#'ts', 'all_nested', 'all_kfold', 'fs_nested_pt_kfold', 'fs_kfold_pt_nested'
-CV_SPLIT_SIZE = np.array([2, 7, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) #2, 3, 5, 8, 13
-PERFORMANCE_METRICS = np.array(['accuracy', 'balanced_accuracy', 'f1', 'precision', 'recall'])  # , 'balanced_accuracy', 'f1', 'precision', 'recall' ; use sklearn scoring parameters; , 'balanced_accuracy', 'top_k_accuracy', 'average_precision', 'neg_brier_score'
+CV_SPLIT_SIZE = np.array([2, 5, 7, 9, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) #2, 3, 5, 8, 13
+MAIN_METRICS = np.array(['accuracy', 'balanced_accuracy', 'f1', 'precision', 'recall'])  # , 'balanced_accuracy', 'f1', 'precision', 'recall' ; use sklearn scoring parameters; , 'balanced_accuracy', 'top_k_accuracy', 'average_precision', 'neg_brier_score'
+SHOULD_BE_BINARY = False
 
-
-FEATURE_SELECTOR = np.array(['rfe', 'sequential']) # , 'sequential'
-FEATURE_SELECTION_FRAC = np.array([0.25, 0.5, 0.75, 1.0]) #np.linspace(0.1, 1, 2, endpoint=True)  # relevant for rfe and sequential, 10, 0.25, 0.5, 0.75, 1.0
+FEATURE_SELECTOR = np.array(['rfe']) # , 'sequential'
+FEATURE_SELECTION_FRAC = np.array([0.4, 0.7, 1.0]) #np.linspace(0.1, 1, 2, endpoint=True)  # relevant for rfe and sequential, 10, 0.25, 0.5, 0.75, 1.0;
 MAX_FEATURES = 14 # this is the maximum number of features for your dataset
 
 # parameter ranges for models
-PAR_SPLIT_SIZE = np.array([2, 7, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) 2, 3, 5, 8, 13, now: 7, 13
-par_grid = {'svm': {'C': np.logspace(-1, 7, num=9, base=2), 'gamma': np.logspace(1, -7, num=9, base=2)},
-            'logistic_regression': {'C': np.logspace(0, 4, num=10, base=10), 'penalty': ['l1', 'l2']},
+PAR_SPLIT_SIZE = np.array([2, 5, 7, 9, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) 2, 3, 5, 8, 13, now: 7, 13
+par_grid = {'svm': {'C': np.logspace(-1, 7, num=7, base=2), 'gamma': np.logspace(1, -7, num=7, base=2)},
+            'logistic_regression': {'C': np.logspace(0, 4, num=5, base=10), 'penalty': ['l1', 'l2']},
             'random_forest': {'n_estimators': [int(x) for x in np.linspace(start=5, stop=500, num=5, endpoint=True)],
                               'max_depth': [
                                   [int(x) for x in np.linspace(10, 100, num=5, endpoint=True)].extend([None, 'sqrt'])],
@@ -62,13 +63,18 @@ SCORING_METRICS = {
 NUM_METRICS = len(SCORING_METRICS.keys())
 PERFORMANCE_METRICS_TEST = ['test_' + i for i in SCORING_METRICS.keys()]
 
+
+warnings.filterwarnings("ignore")
+
+# ------------------------
+
 def select_features(estimator, features, target, sel_type, frac):
     if sel_type == 'rfe':
-        selector = RFE(estimator, n_features_to_select=ceil(frac * MAX_FEATURES), step=1)
+        selector = RFE(estimator, n_features_to_select=frac, step=1)
         selector = selector.fit(features, target)
         return selector.support_
     elif sel_type == 'sequential':
-        selector = SequentialFeatureSelector(estimator, n_features_to_select=ceil(frac * MAX_FEATURES))
+        selector = SequentialFeatureSelector(estimator, n_features_to_select=frac)
         selector = selector.fit(features, target)
         return selector.support_
 
@@ -207,6 +213,7 @@ def measure_performances(model_object, X_to_predict, y_true):
 
 @ray.remote
 def do_calc(model, main_metric, sample_size, feature_selector, feature_selection_frac, validation_type, par_split_size, cv_split_size, train_size):
+    warnings.filterwarnings("ignore")
     performance = np.empty((ROUNDS,NUM_METRICS), float)
     for i in range(ROUNDS):
         j = 0
@@ -217,7 +224,7 @@ def do_calc(model, main_metric, sample_size, feature_selector, feature_selection
                           'main_metric': main_metric,
                           'sample_size': sample_size,
                           'feature_selector': feature_selector,
-                          'num_feature_sel': ceil(feature_selection_frac * MAX_FEATURES),
+                          'feature_selection_frac': feature_selection_frac,
                           'validation_type': validation_type,
                           'train_size': train_size,
                           'cv_split_size': cv_split_size,
@@ -408,7 +415,7 @@ def do_calc(model, main_metric, sample_size, feature_selector, feature_selection
                            main_metric,
                            sample_size,
                            feature_selector,
-                           ceil(feature_selection_frac * MAX_FEATURES),
+                           feature_selection_frac,
                            validation_type,
                            train_size,
                            cv_split_size,
@@ -421,7 +428,7 @@ def do_calc(model, main_metric, sample_size, feature_selector, feature_selection
                            np.round_(upper_bound_confidence_interval, 3),
                            np.round_(variance, 3)]],
                          columns=['model', 'main_metric', 'sample_size', 'feature_selector',
-                                   'num_feature_sel', 'validation_type', 'train_size',
+                                   'feature_selection_frac', 'validation_type', 'train_size',
                                    'cv_split_size', 'par_split_size', 'mean_performance', 'median_performance',
                                    'max_performance', 'min_performance', 'lower_bound_confidence_interval',
                                   'upper_bound_confidence_interval', 'performance_variance'])
@@ -443,9 +450,6 @@ def do_calc(model, main_metric, sample_size, feature_selector, feature_selection
     entry.to_csv('output_entries', mode='a', index=False, header=False)
     return entry
 
-
-ray.init(ignore_reinit_error=True, num_cpus= 128) #ignore_reinit_error=True, num_cpus= 128
-
 if __name__ == '__main__':
     data = read_data()
 
@@ -460,23 +464,25 @@ if __name__ == '__main__':
                         'restecg': float, 'thalach': float, 'exang': float, 'oldpeak': float, 'slope': float,
                         'ca': float, 'thal': float, 'location': int, 'target': int})
 
-    # data.replace({'target': [1,2,3,4]}, value=1, inplace=True) # making it binary
-    #
+    if SHOULD_BE_BINARY:
+        data.replace({'target': [1,2,3,4]}, value=1, inplace=True) # making it binary
+
     # male = data[data['sex'] == 1.0]
+    # female = data[data['sex'] == 0.0]
     # young = data[(data.age < 50)]
     # middle = data[(data.age >= 50) & (data.age < 65)]
     # elder = data[(data.age >= 65)]
 
     output = pd.DataFrame(columns=['model', 'main_metric', 'sample_size', 'feature_selector',
-                                   'num_feature_sel', 'validation_type', 'train_size',
+                                   'feature_selection_frac', 'validation_type', 'train_size',
                                    'cv_split_size', 'par_split_size', 'mean_performance', 'median_performance',
                                    'max_performance', 'min_performance', 'lower_bound_confidence_interval',
                                    'upper_bound_confidence_interval', 'performance_variance'])
 
-
     result = []
+
     for model in MODELS:
-        for main_metric in SCORING_METRICS.keys():
+        for main_metric in MAIN_METRICS:
             for feature_selector in FEATURE_SELECTOR:
                 for sample_size in SAMPLE_SIZES:
                     for feature_selection_frac in FEATURE_SELECTION_FRAC:
