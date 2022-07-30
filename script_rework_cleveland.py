@@ -23,17 +23,17 @@ ray.init(ignore_reinit_error=True, num_cpus=128) #ignore_reinit_error=True, num_
 
 # training & validation
 ROUNDS = 50
-SAMPLE_SIZES = np.array([0.03, 0.05, 0.1, 0.25, 0.5, 1.0]) # np.linspace(0.05, 0.5, 2, endpoint=True) # 0.03, 0.05, 0.1, 0.25, 0.5, 1.0
+SAMPLE_SIZES = np.array([0.1, 0.2, 0.3, 0.5, 0.7, 1.0]) # np.linspace(0.05, 0.5, 2, endpoint=True) # 0.03, 0.05, 0.1, 0.25, 0.5, 1.0
 TRAIN_SIZE = np.array([0.6, 0.8, 0.9]) # np.linspace(0.1, 0.6, 2, endpoint=False) # 0.3, 0.6, 0.8, 0.9
-MODELS = np.array(['svm']) # 'svm', 'logistic_regression', 'naive_bayes', 'knn', 'random_forest', 'decision_tree'
+MODELS = np.array(['svm', 'logistic_regression']) # 'svm', 'logistic_regression', 'naive_bayes', 'knn', 'random_forest', 'decision_tree'
 VALIDATION_TYPES = np.array(['ts', 'all_nested', 'all_kfold', 'fs_nested_pt_kfold', 'fs_kfold_pt_nested'])#'ts', 'all_nested', 'all_kfold', 'fs_nested_pt_kfold', 'fs_kfold_pt_nested'
 CV_SPLIT_SIZE = np.array([2, 5, 7, 9, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) #2, 3, 5, 8, 13
-MAIN_METRICS = np.array(['accuracy', 'balanced_accuracy', 'f1', 'precision', 'recall'])  # , 'balanced_accuracy', 'f1', 'precision', 'recall' ; use sklearn scoring parameters; , 'balanced_accuracy', 'top_k_accuracy', 'average_precision', 'neg_brier_score'
-SHOULD_BE_BINARY = False
+MAIN_METRICS = np.array(['accuracy', 'balanced_accuracy', 'f1'])  # , 'balanced_accuracy', 'f1', 'precision', 'recall' ; use sklearn scoring parameters; , 'balanced_accuracy', 'top_k_accuracy', 'average_precision', 'neg_brier_score'
+SHOULD_BE_BINARY = True
 
 FEATURE_SELECTOR = np.array(['rfe']) # , 'sequential'
 FEATURE_SELECTION_FRAC = np.array([0.4, 0.7, 1.0]) #np.linspace(0.1, 1, 2, endpoint=True)  # relevant for rfe and sequential, 10, 0.25, 0.5, 0.75, 1.0;
-MAX_FEATURES = 14 # this is the maximum number of features for your dataset
+MAX_FEATURES = 13 # this is the maximum number of features for your dataset
 
 # parameter ranges for models
 PAR_SPLIT_SIZE = np.array([2, 5, 7, 9, 13]) # np.linspace(2, 10, 2, endpoint=True).astype(int) 2, 3, 5, 8, 13, now: 7, 13
@@ -92,21 +92,8 @@ def read_data():
     data_path = os.path.join(os.getcwd(), "data/")
 
     cleveland_data = pd.read_csv(os.path.join(data_path, "processed.cleveland.data"), names=column_names, na_values='?')
-    cleveland_data['location'] = 0
 
-    hungarian_data = pd.read_csv(os.path.join(data_path, "reprocessed.hungarian.data"), na_values='-9',
-                                 names=column_names, delimiter=' ')
-    hungarian_data['location'] = 1
-
-    switzerland_data = pd.read_csv(os.path.join(data_path, "processed.switzerland.data"), names=column_names, na_values='?')
-    switzerland_data['location'] = 2
-
-    va_data = pd.read_csv(os.path.join(data_path, "processed.va.data"), names=column_names, na_values='?')
-    va_data['location'] = 3
-
-    r = pd.concat([cleveland_data, hungarian_data, switzerland_data, va_data], axis=0, ignore_index=True)
-
-    return pre_process(r)
+    return pre_process(cleveland_data)
 
 
 def pre_process(data_to_process):
@@ -114,7 +101,7 @@ def pre_process(data_to_process):
     r.replace({'chol': 0, 'trestbps': 0}, value=np.NaN, inplace=True)  # chol and trestbps seem to have 0-values
     r['thal'].replace({3.0: 0.0, 6.0: 1.0, 7.0: 2.0}, inplace=True)
     r = r[['age', 'sex', 'cp', 'trestbps', 'chol', 'fbs', 'restecg', 'thalach', 'exang', 'oldpeak', 'slope',
-           'ca', 'thal', 'location', 'target']]
+           'ca', 'thal', 'target']]
     return r
 
 
@@ -378,7 +365,7 @@ if __name__ == '__main__':
     data = replace_nan(data)
     data = data.astype({'age': int, 'sex': int, 'cp': int, 'trestbps': float, 'chol': float, 'fbs': float,
                         'restecg': float, 'thalach': float, 'exang': float, 'oldpeak': float, 'slope': float,
-                        'ca': float, 'thal': float, 'location': int, 'target': int})
+                        'ca': float, 'thal': float, 'target': int})
 
     if SHOULD_BE_BINARY:
         data.replace({'target': [1,2,3,4]}, value=1, inplace=True) # making it binary
