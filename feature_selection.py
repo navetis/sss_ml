@@ -5,11 +5,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import RFE, SequentialFeatureSelector
 from sklearn.impute import KNNImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import make_scorer, f1_score, recall_score, precision_score, accuracy_score, \
-    balanced_accuracy_score
-from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold, cross_validate, KFold
-from sklearn.naive_bayes import GaussianNB
-from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.tree import DecisionTreeClassifier
 import ray
@@ -19,15 +14,15 @@ NAN_REPLACEMENT = 'knn'  # options: mean, median, knn
 NAN_KNN_NEIGHBORS = 5  # should only be used, when knn for NaN replacement selected
 
 
-ray.init(ignore_reinit_error=True, num_cpus=128) #ignore_reinit_error=True, num_cpus= 128
+ray.init(ignore_reinit_error=True, num_cpus=128)
 
 # training & validation
 ROUNDS = 50
-SAMPLE_SIZES = np.array([0.02, 0.03, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0]) # np.linspace(0.05, 0.5, 2, endpoint=True) # 0.03, 0.05, 0.1, 0.25, 0.5, 1.0
+SAMPLE_SIZES = np.array([0.02, 0.03, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0])
 MODELS = np.array(['svm', 'logistic_regression']) # 'svm', 'logistic_regression', 'naive_bayes', 'knn', 'random_forest', 'decision_tree'
 
 FEATURE_SELECTOR = np.array(['rfe']) # , 'sequential'
-FEATURE_SELECTION_FRAC = np.array([0.4, 0.7, 1.0]) #np.linspace(0.1, 1, 2, endpoint=True)  # relevant for rfe and sequential, 10, 0.25, 0.5, 0.75, 1.0;
+FEATURE_SELECTION_FRAC = np.array([0.4, 0.7, 1.0])
 MAX_FEATURES = 14 # this is the maximum number of features for your dataset
 
 warnings.filterwarnings("ignore")
@@ -249,24 +244,12 @@ def do_calc_nonbinary(model, sample_size, feature_selector, feature_selection_fr
 if __name__ == '__main__':
     data = read_data()
 
-
-    # data_without_nan = data.dropna()
-    # customize here for your output
-    # X_data_without_nan = data_without_nan.drop('target', axis=1)
-    # y_data_without_nan = data_without_nan['target']
-
     data = replace_nan(data)
     data = data.astype({'age': int, 'sex': int, 'cp': int, 'trestbps': float, 'chol': float, 'fbs': float,
                         'restecg': float, 'thalach': float, 'exang': float, 'oldpeak': float, 'slope': float,
                         'ca': float, 'thal': float, 'location': int, 'target': int})
 
-    data_binary = data.replace({'target': [1,2,3,4]}, value=1, inplace=True) # making it binary
-
-    # male = data[data['sex'] == 1.0]
-    # female = data[data['sex'] == 0.0]
-    # young = data[(data.age < 50)]
-    # middle = data[(data.age >= 50) & (data.age < 65)]
-    # elder = data[(data.age >= 65)]
+    data_binary = data.replace({'target': [1,2,3,4]}, value=1) # making it binary
 
     output = pd.DataFrame(columns=['model', 'sample_size', 'is_binary', 'feature_selector', 'feature_selection_frac', 'selection_age', 'selection_sex', 'selection_cp', 'selection_trestbps', 'selection_chol', 'selection_fbs',
                         'selection_restecg', 'selection_thalach', 'selection_exang', 'selection_oldpeak', 'selection_slope',
