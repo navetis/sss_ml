@@ -13,3 +13,5 @@ The following files are scripts belonging to the experiments
 - *feature\_selection.py* is used to run the experiment from section \ref{sec:feature_selection}.
 
 Please be aware, that the sampling of the data is a random process. Thus there is no guarantee that executing the scripts will yield identical results.
+
+The repository also includes the initial data analysis and the analysis of the results.
